@@ -20,6 +20,7 @@ find_package(nav_msgs REQUIRED)
 find_package(nmea_msgs REQUIRED)
 find_package(mavros_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 
 link_directories(lib/xspublic/xscontroller lib/xspublic/xscommon lib/xspublic/xstypes)
 
@@ -105,6 +106,7 @@ ament_target_dependencies(xsens_mti_node
 	nmea_msgs
 	mavros_msgs
 	rosidl_default_runtime
+	diagnostic_msgs
 )
 
 # Handle typesupport linking differently based on ROS distro
@@ -183,6 +185,7 @@ ament_export_dependencies(
 	nmea_msgs
 	mavros_msgs
 	rosidl_default_runtime #the default runtime for ROS 2 interface (message, service, action) generation.
+	diagnostic_msgs
 )
 
 ament_export_include_directories(
