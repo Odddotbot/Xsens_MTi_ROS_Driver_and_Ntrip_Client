@@ -1,14 +1,11 @@
-#Set minimum required CMake version and project name.
 cmake_minimum_required(VERSION 3.5)
 project(xsens_mti_ros2_driver)
 
-
-# Set C++ standard, default to C++14
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)
 endif()
 
-# Find dependencies
+# Find ROS dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2 REQUIRED)
@@ -19,12 +16,10 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(nmea_msgs REQUIRED)
 find_package(mavros_msgs REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 
-link_directories(lib/xspublic/xscontroller lib/xspublic/xscommon lib/xspublic/xstypes)
-
-# Check ROS distro
+# Detect ROS distro
 if(DEFINED ENV{ROS_DISTRO})
   set(ROS_DISTRO $ENV{ROS_DISTRO})
 else()
@@ -33,128 +28,84 @@ endif()
 
 message(STATUS "Detected ROS_DISTRO: ${ROS_DISTRO}")
 
-################################################
-## Declare ROS messages, services and actions ##
-################################################
-
-
-## Generate messages in the 'msg' folder
-
+# Generate ROS interfaces
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/XsStatusWord.msg"
   DEPENDENCIES std_msgs
 )
 
-
 ament_export_dependencies(rosidl_default_runtime)
 
-###########
-## Build ##
-###########
-
-
-# Include ExternalProject module
-include(ExternalProject)
-
-# Define the external project which is make the xspublic
-ExternalProject_Add(
-  xspublic
-  PREFIX ${CMAKE_BINARY_DIR}/xspublic
-  SOURCE_DIR ${CMAKE_SOURCE_DIR}/lib/xspublic
-  CONFIGURE_COMMAND ""  # No configure step
-  BUILD_COMMAND make
-  BUILD_IN_SOURCE 1  # Build in the source directory
-  INSTALL_COMMAND ""  # No install step
-)
-
-## Specify additional locations of header files
-## Your package locations should be listed before other locations
+# Include headers
 include_directories(
-  ${PROJECT_SOURCE_DIR}/include/
+  ${PROJECT_SOURCE_DIR}/lib/xspublic
+  ${PROJECT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/lib/xspublic
 )
 
-
-add_executable(
-	xsens_mti_node
-	src/main.cpp
-	src/xdainterface.cpp
-	src/xdacallback.cpp
-	src/xsens_log_handler.cpp
-	src/ntrip_util.cpp
-	src/xsens_time_handler.cpp
+# Tell linker where to find the static libraries built by the Makefile
+link_directories(
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/xspublic/xscontroller
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/xspublic/xscommon
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/xspublic/xstypes
 )
 
-# Make sure xsens_mti_node depends on the xspublic build
+# Add custom target that builds all three libs by running the Makefile in lib/xspublic
+add_custom_target(xspublic ALL
+  COMMAND ${CMAKE_MAKE_PROGRAM} -C ${CMAKE_CURRENT_SOURCE_DIR}/lib/xspublic
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lib/xspublic
+  COMMENT "Building Xsens SDK libraries using Makefile"
+)
+
+# Create executable
+add_executable(xsens_mti_node
+  src/main.cpp
+  src/xdainterface.cpp
+  src/xdacallback.cpp
+  src/xsens_log_handler.cpp
+  src/ntrip_util.cpp
+  src/xsens_time_handler.cpp
+)
+
+# Make sure the node depends on the Xsens SDK libs being built
 add_dependencies(xsens_mti_node xspublic ${PROJECT_NAME})
 
-
-# target_include_directories(xsens_mti_node PUBLIC
-#   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/xspublic>
-#   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp> 
-#   $<INSTALL_INTERFACE:include>)
-
-ament_target_dependencies(xsens_mti_node 
-	rclcpp
-	tf2
-	tf2_ros
-	std_msgs
-	geometry_msgs
-	sensor_msgs
-	nav_msgs
-	nmea_msgs
-	mavros_msgs
-	rosidl_default_runtime
-	diagnostic_msgs
+# Link libraries (SDK libs + pthread + dl)
+target_link_libraries(xsens_mti_node
+  xscontroller
+  xscommon
+  xstypes
+  pthread
+  dl
 )
 
-# Handle typesupport linking differently based on ROS distro
+# Link ROS dependencies
+ament_target_dependencies(xsens_mti_node
+  rclcpp tf2 tf2_ros std_msgs geometry_msgs sensor_msgs
+  nav_msgs nmea_msgs mavros_msgs diagnostic_msgs rosidl_default_runtime
+)
+
+# ROS 2 typesupport handling for Foxy and later
 if(${ROS_DISTRO} STREQUAL "foxy")
-  # For Foxy, directly link to the generated libraries
   target_link_libraries(xsens_mti_node
     ${CMAKE_BINARY_DIR}/libxsens_mti_ros2_driver__rosidl_typesupport_cpp.so
   )
-  
-  # Make sure the executable depends on message generation
-  add_dependencies(xsens_mti_node 
+  add_dependencies(xsens_mti_node
     ${PROJECT_NAME}__rosidl_typesupport_cpp
   )
-  
-  # Add generated interfaces directory to include path
   target_include_directories(xsens_mti_node PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp
   )
 else()
-  # For Humble and later, use the built-in typesupport target function
   rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
   target_link_libraries(xsens_mti_node "${cpp_typesupport_target}")
 endif()
 
-target_link_libraries(
-	xsens_mti_node
-	xscontroller
-	xscommon
-	xstypes
-	pthread
-	dl
-)
-
-
-
-#############
-## Install ##
-#############
-
-# all install targets should use catkin DESTINATION variables
-# See http://ros.org/doc/api/catkin/html/adv_user_guide/variables.html
-
-## Mark executables and/or libraries for installation
+# Installation rules
 install(TARGETS xsens_mti_node
   EXPORT export_${PROJECT_NAME}
   DESTINATION lib/${PROJECT_NAME}
 )
-
 
 install(DIRECTORY launch param rviz urdf
   DESTINATION share/${PROJECT_NAME}
@@ -165,32 +116,11 @@ install(DIRECTORY headers/
   FILES_MATCHING PATTERN "*.h"
 )
 
-
-
-#############
-## Export  ##
-#############
-#This command is used to specify the dependencies that other packages need to know about 
-#when they depend on this package. 
-#This means if another package declares a build or run dependency on this package, 
-#the dependencies listed inside ament_export_dependencies will be made available to that dependent package.
 ament_export_dependencies(
-	rclcpp
-	tf2
-	tf2_ros
-	std_msgs
-	geometry_msgs
-	sensor_msgs
-	nav_msgs
-	nmea_msgs
-	mavros_msgs
-	rosidl_default_runtime #the default runtime for ROS 2 interface (message, service, action) generation.
-	diagnostic_msgs
+  rclcpp tf2 tf2_ros std_msgs geometry_msgs sensor_msgs nav_msgs
+  nmea_msgs mavros_msgs diagnostic_msgs rosidl_default_runtime
 )
 
-ament_export_include_directories(
-	include
-)
-
+ament_export_include_directories(include)
 
 ament_package()
