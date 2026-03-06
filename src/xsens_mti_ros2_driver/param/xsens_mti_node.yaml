@@ -223,6 +223,13 @@
         # To verify if MGBE was successful, use 'rostopic echo /status'.
         # If the 'no_rotation_update_status' changes from 3 to 0, MGBE was successful.
 
+        # Automatic IMU filter reset on prolonged MGBE abort state.
+        # When enabled, the driver monitors the IMU status word and switches
+        # Measurement -> Config -> Measurement
+        enable_filter_reset: false
+        filter_reset_timeout_sec: 60
+        filter_reset_cooldown_sec: 60
+
         # RotSensor Frame changes
         # roll, pitch, yaw values
         # if your MTi-630 is installed upside-down(connector to the upside), then use 180deg for the roll.

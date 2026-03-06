@@ -64,6 +64,7 @@ public:
 	bool connectDevice();
 	bool prepare();
 	void close();
+	bool resetImu();
 
 	void setupManualGyroBiasEstimation();
 
