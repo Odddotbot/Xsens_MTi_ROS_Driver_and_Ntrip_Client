@@ -39,6 +39,10 @@
 #include "xdacallback.h"
 #include <xstypes/xsportinfo.h>
 #include <xstypes/xsstring.h>
+#include "std_msgs/msg/empty.hpp"
+#include "rmw/qos_profiles.h"
+#include "rclcpp/qos.hpp"
+	
 #include <chrono>
 
 struct XsControl;
