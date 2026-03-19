@@ -34,7 +34,6 @@
 #define XDAINTERFACE_H
 
 #include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/empty.hpp>
 #include <mavros_msgs/msg/rtcm.hpp>
 #include "xdacallback.h"
 #include <xstypes/xsportinfo.h>
@@ -42,7 +41,7 @@
 #include "std_msgs/msg/empty.hpp"
 #include "rmw/qos_profiles.h"
 #include "rclcpp/qos.hpp"
-	
+
 #include <chrono>
 
 struct XsControl;
