@@ -69,70 +69,8 @@
 #include "xsens_log_handler.h"
 
 #include <chrono>
-#include <functional>
 
 #define XS_DEFAULT_BAUDRATE (115200)
-
-namespace
-{
-	struct ImuResetHandler : public PacketCallback
-	{
-		rclcpp::Node::SharedPtr node_;
-		std::function<bool()> reset_callback_;
-		int reset_timeout_sec_ = 60;
-		int reset_cooldown_sec_ = 60;
-		bool invalid_state_active_ = false;
-		rclcpp::Time invalid_state_since_;
-		rclcpp::Time last_reset_time_;
-
-		ImuResetHandler(rclcpp::Node::SharedPtr node, std::function<bool()> reset_callback)
-			: node_(std::move(node)), reset_callback_(std::move(reset_callback)), invalid_state_since_(0, 0, RCL_ROS_TIME), last_reset_time_(0, 0, RCL_ROS_TIME)
-		{
-			node_->get_parameter("filter_reset_timeout_sec", reset_timeout_sec_);
-			node_->get_parameter("filter_reset_cooldown_sec", reset_cooldown_sec_);
-
-			if (reset_timeout_sec_ < 1)
-				reset_timeout_sec_ = 1;
-
-			if (reset_cooldown_sec_ < 0)
-				reset_cooldown_sec_ = 0;
-		}
-
-		void operator()(const XsDataPacket &packet, rclcpp::Time timestamp) override
-		{
-			if (!packet.containsStatus())
-				return;
-
-			uint32_t status = packet.status();
-			uint8_t no_rotation_update_status = (status >> 3) & 0x3;
-
-			if (no_rotation_update_status != 2)
-			{
-				invalid_state_active_ = false;
-				invalid_state_since_ = rclcpp::Time(0, 0, timestamp.get_clock_type());
-				return;
-			}
-
-			if (!invalid_state_active_)
-			{
-				invalid_state_active_ = true;
-				invalid_state_since_ = timestamp;
-			}
-
-			const rclcpp::Duration invalid_duration = timestamp - invalid_state_since_;
-			const bool cooldown_elapsed = last_reset_time_.nanoseconds() == 0 ||
-				(timestamp - last_reset_time_) >= rclcpp::Duration::from_seconds(reset_cooldown_sec_);
-
-			if (invalid_duration < rclcpp::Duration::from_seconds(reset_timeout_sec_) || !cooldown_elapsed)
-				return;
-
-			RCLCPP_WARN(node_->get_logger(), "MGBE abort state persisted for %.0f seconds; resetting IMU filter.", invalid_duration.seconds());
-			reset_callback_();
-			last_reset_time_ = timestamp;
-			invalid_state_since_ = timestamp;
-		}
-	};
-}
 
 XdaInterface::XdaInterface(rclcpp::Node::SharedPtr node)
     : m_device(nullptr), m_xdaCallback(node), m_node(node), m_productCode("")
@@ -169,7 +107,6 @@ void XdaInterface::registerPublishers()
 	bool isDeviceVruAhrs = m_device->deviceId().isAhrs() || m_device->deviceId().isVru();
 	bool isDeviceGnss = m_device->deviceId().isGnss();
 	bool isDeviceGnssRtk = m_device->deviceId().isRtk();
-	bool enable_filter_reset = false;
 
 	if (m_node->get_parameter("pub_acceleration", should_publish) && should_publish)
 	{
@@ -207,11 +144,6 @@ void XdaInterface::registerPublishers()
 	{
 		// RCLCPP_INFO(m_node->get_logger(), "registerCallback StatusPublisher....");
 		registerCallback(new StatusPublisher(m_node));
-	}
-
-	if (m_node->get_parameter("enable_filter_reset", enable_filter_reset) && enable_filter_reset)
-	{
-		registerCallback(new ImuResetHandler(m_node, std::bind(&XdaInterface::resetImu, this)));
 	}
 
 	if (m_node->get_parameter("pub_utctime", should_publish) && should_publish)
@@ -449,6 +381,7 @@ bool XdaInterface::connectDevice()
 bool XdaInterface::prepare()
 {
 	assert(m_device != 0);
+	m_node->get_parameter("enable_mgbe_filter_reset", m_enableMgbeFilterReset);
 
 	if (!m_device->gotoConfig())
 		return handleError("Could not go to config");
@@ -499,15 +432,39 @@ bool XdaInterface::prepare()
 			return handleError("Could not start recording");
 	}
 
-
 	//delay 0.05 second, as the previous actions might take a little delay.
 	rclcpp::sleep_for(std::chrono::milliseconds(50));
-	
+
 	//in any case, send MGBE in the beginning for 6 seconds.
 	manualGyroBiasEstimation(0, 6);
 
 	// Setup Periodic Manual Gyro Bias Estimation
     setupManualGyroBiasEstimation();
+
+	return true;
+}
+
+
+/**
+ * \brief Resets the filter state before an MGBE request.
+ *
+ * This function performs a hardcoded mode cycle on the device by switching to
+ * config mode, waiting 100ms, switching back to measurement mode, and waiting
+ * another 100ms.
+ */
+bool XdaInterface::resetFilter()
+{
+	RCLCPP_INFO(m_node->get_logger(), "Filter reset attempted.");
+
+	if (!m_device->gotoConfig())
+		return handleError("Could not go to config before MGBE");
+
+	rclcpp::sleep_for(std::chrono::milliseconds(100));
+
+	if (!m_device->gotoMeasurement())
+		return handleError("Could not go to measurement before MGBE");
+
+	rclcpp::sleep_for(std::chrono::milliseconds(100));
 
 	return true;
 }
@@ -534,12 +491,15 @@ bool XdaInterface::manualGyroBiasEstimation(uint16_t sleep, uint16_t duration)
     if (sleep > 0)
 		rclcpp::sleep_for(std::chrono::milliseconds(sleep));
 
+	if (m_enableMgbeFilterReset && !resetFilter())
+		return false;
+
 	XsMessage snd(XMID_SetNoRotation, sizeof(uint16_t));
 	XsMessage rcv;
 	snd.setDataShort(duration);
 	if (!m_device->sendCustomMessage(snd, true, rcv, 1000))
 		return false;
-    RCLCPP_INFO(m_node->get_logger(), "MGBE done.");
+	RCLCPP_INFO(m_node->get_logger(), "MGBE done.");
 	return true;
 }
 
@@ -555,10 +515,10 @@ bool XdaInterface::manualGyroBiasEstimation(uint16_t sleep, uint16_t duration)
 
 void XdaInterface::setupManualGyroBiasEstimation()
 {
-    // Check if manual gyro bias estimation is enabled and parameters are available
-    bool enable_manual_gyro_bias = false;
+	// Check if manual gyro bias estimation is enabled and parameters are available
+	bool enable_manual_gyro_bias = false;
 	//assign default value {10,3} to manual_gyro_bias_param
-    std::vector<long int>  manual_gyro_bias_param = {10, 3};
+	std::vector<long int>  manual_gyro_bias_param = {10, 3};
 	m_node->declare_parameter("enable_manual_gyro_bias", enable_manual_gyro_bias);
 	m_node->declare_parameter("manual_gyro_bias_param",manual_gyro_bias_param);
 
@@ -611,10 +571,7 @@ void XdaInterface::setupManualGyroBiasEstimation()
 		{
 			RCLCPP_INFO(m_node->get_logger(), "Manual Gyro Bias Estimation is disabled.");
 		}
-
 	}
-
-
 }
 
 
@@ -638,24 +595,6 @@ void XdaInterface::close()
 	}
 	m_control->closePort(m_port);
 }
-
-bool XdaInterface::resetImu()
-{
-	assert(m_device != 0);
-
-	RCLCPP_WARN(m_node->get_logger(), "Resetting IMU filter by switching to config mode and back to measurement mode.");
-
-	if (!m_device->gotoConfig())
-		return handleError("Could not go to config");
-
-	if (!m_device->gotoMeasurement())
-		return handleError("Could not put device into measurement mode");
-
-	RCLCPP_INFO(m_node->get_logger(), "IMU filter reset completed successfully.");
-	return true;
-}
-
-
 
 void XdaInterface::registerCallback(PacketCallback *cb)
 {
@@ -1466,9 +1405,7 @@ void XdaInterface::declareCommonParameters()
 
 	m_node->declare_parameter("enable_setting_baudrate", false);
 	m_node->declare_parameter("set_baudrate_value", 115200);
-	m_node->declare_parameter("enable_filter_reset", false);
-	m_node->declare_parameter("filter_reset_timeout_sec", 60);
-	m_node->declare_parameter("filter_reset_cooldown_sec", 60);
+	m_node->declare_parameter("enable_mgbe_filter_reset", false);
 
 
 	bool should_publish = true;

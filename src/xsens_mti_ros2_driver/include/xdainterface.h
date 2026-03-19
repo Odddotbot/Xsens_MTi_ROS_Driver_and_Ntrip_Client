@@ -34,14 +34,11 @@
 #define XDAINTERFACE_H
 
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <mavros_msgs/msg/rtcm.hpp>
 #include "xdacallback.h"
 #include <xstypes/xsportinfo.h>
 #include <xstypes/xsstring.h>
-#include "std_msgs/msg/empty.hpp"
-#include "rmw/qos_profiles.h"
-#include "rclcpp/qos.hpp"
-
 #include <chrono>
 
 struct XsControl;
@@ -64,7 +61,6 @@ public:
 	bool connectDevice();
 	bool prepare();
 	void close();
-	bool resetImu();
 
 	void setupManualGyroBiasEstimation();
 
@@ -73,6 +69,7 @@ private:
 	bool handleError(std::string error);
 	void declareCommonParameters();
 	bool configureSensorSettings();
+	bool resetFilter();
 	bool manualGyroBiasEstimation(uint16_t sleep, uint16_t duration);
 
 	XsControl *m_control;
@@ -82,7 +79,7 @@ private:
 	XdaCallback m_xdaCallback;
 	std::list<PacketCallback *> m_callbacks;
 	rclcpp::Node::SharedPtr m_node; 
-	// Timer for Manual Gyro Bias Estimation
+	bool m_enableMgbeFilterReset = false;
 	rclcpp::TimerBase::SharedPtr m_manualGyroBiasTimer;
 	rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr m_manualGyroBiasSubscriber;
 	rclcpp::Subscription<mavros_msgs::msg::RTCM>::SharedPtr m_rtcmSubscription;
