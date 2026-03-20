@@ -499,7 +499,7 @@ bool XdaInterface::manualGyroBiasEstimation(uint16_t sleep, uint16_t duration)
 	snd.setDataShort(duration);
 	if (!m_device->sendCustomMessage(snd, true, rcv, 1000))
 		return false;
-	RCLCPP_INFO(m_node->get_logger(), "MGBE done.");
+	RCLCPP_INFO(m_node->get_logger(), "MGBE attempt requested.");
 	return true;
 }
 
