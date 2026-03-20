@@ -100,14 +100,38 @@ void XdaInterface::spinFor(std::chrono::milliseconds timeout)
 
 			if (m_enableMgbeFilterReset)
 			{
-				if (noRotationUpdateStatus == 2 && !m_mgbeFailSince.has_value())
+				if (noRotationUpdateStatus == 2)
 				{
-					m_mgbeFailSince = std::chrono::steady_clock::now();
-					RCLCPP_INFO(m_node->get_logger(), "MGBE failure episode detected (status 2). Waiting %d seconds before filter reset.", m_mgbeFilterResetDelay);
+					if (!m_mgbeFilterResetTimer)
+					{
+						RCLCPP_INFO(m_node->get_logger(), "MGBE failure detected. Scheduling filter reset in %d seconds.", m_mgbeFilterResetTimeout);
+						m_mgbeFilterResetTimer = m_node->create_wall_timer(
+							std::chrono::seconds(m_mgbeFilterResetTimeout),
+							[this]() {
+								RCLCPP_INFO(m_node->get_logger(), "MGBE failure persisted for %d seconds. Performing filter reset.", m_mgbeFilterResetTimeout);
+
+								if (!resetFilter())
+								{
+									RCLCPP_ERROR(m_node->get_logger(), "Failed to reset filter after MGBE timeout.");
+								}
+
+								if (m_mgbeFilterResetTimer)
+								{
+									m_mgbeFilterResetTimer->cancel();
+									m_mgbeFilterResetTimer.reset();
+								}
+							}
+						);
+					}
 				}
-				else if (noRotationUpdateStatus == 0 && m_mgbeFailSince.has_value())
+				else if (noRotationUpdateStatus == 0)
 				{
-					m_mgbeFailSince.reset();
+					if (m_mgbeFilterResetTimer)
+					{
+						m_mgbeFilterResetTimer->cancel();
+						m_mgbeFilterResetTimer.reset();
+						RCLCPP_INFO(m_node->get_logger(), "MGBE recovered (status 0). Cancelled pending filter reset timeout.");
+					}
 				}
 			}
 		}
@@ -118,7 +142,6 @@ void XdaInterface::spinFor(std::chrono::milliseconds timeout)
 		}
 	}
 }
-
 void XdaInterface::registerPublishers()
 {
 	bool should_publish;
@@ -400,7 +423,7 @@ bool XdaInterface::prepare()
 {
 	assert(m_device != 0);
 	m_node->get_parameter("enable_mgbe_filter_reset", m_enableMgbeFilterReset);
-	m_node->get_parameter("mgbe_filter_reset_delay", m_mgbeFilterResetDelay);
+	m_node->get_parameter("mgbe_filter_reset_timeout", m_mgbeFilterResetTimeout);
 
 	if (!m_device->gotoConfig())
 		return handleError("Could not go to config");
@@ -510,18 +533,6 @@ bool XdaInterface::manualGyroBiasEstimation(uint16_t sleep, uint16_t duration)
     if (sleep > 0)
 		rclcpp::sleep_for(std::chrono::milliseconds(sleep));
 
-	if (m_enableMgbeFilterReset && m_mgbeFailSince.has_value())
-	{
-		auto now = std::chrono::steady_clock::now();
-		if (std::chrono::duration_cast<std::chrono::seconds>(now - *m_mgbeFailSince).count() >= m_mgbeFilterResetDelay)
-		{
-			RCLCPP_INFO(m_node->get_logger(), "MGBE stuck in failure for %d seconds. Performing filter reset.", m_mgbeFilterResetDelay);
-			if (!resetFilter())
-				return false;
-			m_mgbeFailSince.reset();
-		}
-	}
-
 	XsMessage snd(XMID_SetNoRotation, sizeof(uint16_t));
 	XsMessage rcv;
 	snd.setDataShort(duration);
@@ -615,6 +626,12 @@ void XdaInterface::rtcmCallback(const mavros_msgs::msg::RTCM::SharedPtr msg)
 
 void XdaInterface::close()
 {
+	if (m_mgbeFilterResetTimer)
+	{
+		m_mgbeFilterResetTimer->cancel();
+		m_mgbeFilterResetTimer.reset();
+	}
+
 	if (m_device != nullptr)
 	{
 		m_device->stopRecording();
@@ -1434,7 +1451,7 @@ void XdaInterface::declareCommonParameters()
 	m_node->declare_parameter("enable_setting_baudrate", false);
 	m_node->declare_parameter("set_baudrate_value", 115200);
 	m_node->declare_parameter("enable_mgbe_filter_reset", false);
-	m_node->declare_parameter("mgbe_filter_reset_delay", 300);
+	m_node->declare_parameter("mgbe_filter_reset_timeout", 300);
 
 
 	bool should_publish = true;
