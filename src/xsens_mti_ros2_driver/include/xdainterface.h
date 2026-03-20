@@ -43,6 +43,7 @@
 #include "rclcpp/qos.hpp"
 
 #include <chrono>
+#include <optional>
 
 struct XsControl;
 struct XsDevice;
@@ -83,6 +84,8 @@ private:
 	std::list<PacketCallback *> m_callbacks;
 	rclcpp::Node::SharedPtr m_node; 
 	bool m_enableMgbeFilterReset = false;
+	std::optional<std::chrono::steady_clock::time_point> m_mgbeFailSince;
+	int m_mgbeFilterResetDelay = 300;
 	rclcpp::TimerBase::SharedPtr m_manualGyroBiasTimer;
 	rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr m_manualGyroBiasSubscriber;
 	rclcpp::Subscription<mavros_msgs::msg::RTCM>::SharedPtr m_rtcmSubscription;

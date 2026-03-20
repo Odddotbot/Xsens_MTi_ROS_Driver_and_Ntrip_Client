@@ -94,6 +94,24 @@ void XdaInterface::spinFor(std::chrono::milliseconds timeout)
 
 	if (!rosPacket.second.empty())
 	{
+		if (rosPacket.second.containsStatus())
+		{
+			uint8_t noRotationUpdateStatus = (rosPacket.second.status() >> 3) & 0x3;
+
+			if (m_enableMgbeFilterReset)
+			{
+				if (noRotationUpdateStatus == 2 && !m_mgbeFailSince.has_value())
+				{
+					m_mgbeFailSince = std::chrono::steady_clock::now();
+					RCLCPP_INFO(m_node->get_logger(), "MGBE failure episode detected (status 2). Waiting %d seconds before filter reset.", m_mgbeFilterResetDelay);
+				}
+				else if (noRotationUpdateStatus == 0 && m_mgbeFailSince.has_value())
+				{
+					m_mgbeFailSince.reset();
+				}
+			}
+		}
+
 		for (auto &cb : m_callbacks)
 		{
 			cb->operator()(rosPacket.second, rosPacket.first);
@@ -382,6 +400,7 @@ bool XdaInterface::prepare()
 {
 	assert(m_device != 0);
 	m_node->get_parameter("enable_mgbe_filter_reset", m_enableMgbeFilterReset);
+	m_node->get_parameter("mgbe_filter_reset_delay", m_mgbeFilterResetDelay);
 
 	if (!m_device->gotoConfig())
 		return handleError("Could not go to config");
@@ -491,8 +510,17 @@ bool XdaInterface::manualGyroBiasEstimation(uint16_t sleep, uint16_t duration)
     if (sleep > 0)
 		rclcpp::sleep_for(std::chrono::milliseconds(sleep));
 
-	if (m_enableMgbeFilterReset && !resetFilter())
-		return false;
+	if (m_enableMgbeFilterReset && m_mgbeFailSince.has_value())
+	{
+		auto now = std::chrono::steady_clock::now();
+		if (std::chrono::duration_cast<std::chrono::seconds>(now - *m_mgbeFailSince).count() >= m_mgbeFilterResetDelay)
+		{
+			RCLCPP_INFO(m_node->get_logger(), "MGBE stuck in failure for %d seconds. Performing filter reset.", m_mgbeFilterResetDelay);
+			if (!resetFilter())
+				return false;
+			m_mgbeFailSince.reset();
+		}
+	}
 
 	XsMessage snd(XMID_SetNoRotation, sizeof(uint16_t));
 	XsMessage rcv;
@@ -1406,6 +1434,7 @@ void XdaInterface::declareCommonParameters()
 	m_node->declare_parameter("enable_setting_baudrate", false);
 	m_node->declare_parameter("set_baudrate_value", 115200);
 	m_node->declare_parameter("enable_mgbe_filter_reset", false);
+	m_node->declare_parameter("mgbe_filter_reset_delay", 300);
 
 
 	bool should_publish = true;
