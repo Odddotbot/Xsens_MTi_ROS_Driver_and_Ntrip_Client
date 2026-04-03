@@ -82,9 +82,7 @@ private:
 	XdaCallback m_xdaCallback;
 	std::list<PacketCallback *> m_callbacks;
 	rclcpp::Node::SharedPtr m_node; 
-	bool m_enableMgbeFilterReset = false;
-	int m_mgbeFilterResetTimeout = 300;
-	rclcpp::TimerBase::SharedPtr m_mgbeFilterResetTimer;
+	bool m_enableMgbeFilterReset = true;
 	rclcpp::TimerBase::SharedPtr m_manualGyroBiasTimer;
 	rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr m_manualGyroBiasSubscriber;
 	rclcpp::Subscription<mavros_msgs::msg::RTCM>::SharedPtr m_rtcmSubscription;
