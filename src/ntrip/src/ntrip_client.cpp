@@ -262,7 +262,7 @@ namespace ntrip_client
     std::stringstream request;
     request << "GET /" << mountpoint_ << " HTTP/1.1\r\n"
             << "Host: " << host_ << ":" << port_ << "\r\n"
-            << "Ntrip-Version: Ntrip/2.0\r\n"
+            << "Ntrip-Version: Ntrip/1.0\r\n"
             << "User-Agent: NTRIP ROS2 Client/1.0\r\n";
 
     if (!username_.empty() || !password_.empty())
@@ -388,8 +388,8 @@ namespace ntrip_client
       {
         std::string nmea_msg = msg->sentence + "\r\n";
 
-        RCLCPP_INFO(this->get_logger(), "Sending GGA message: %s",
-                    msg->sentence.c_str());
+        RCLCPP_DEBUG(this->get_logger(), "Sending GGA message: %s",
+                     msg->sentence.c_str());
 
         boost::system::error_code error;
         boost::asio::write(socket_, boost::asio::buffer(nmea_msg), error);
