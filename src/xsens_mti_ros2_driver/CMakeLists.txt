@@ -16,7 +16,6 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(nmea_msgs REQUIRED)
 find_package(mavros_msgs REQUIRED)
-find_package(diagnostic_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 find_package(diagnostic_msgs REQUIRED)
@@ -83,24 +82,7 @@ add_executable(xsens_mti_node
   src/high_rate_interpolator.cpp
 )
 
-# Add custom target that builds all three libs by running the Makefile in lib/xspublic
-add_custom_target(xspublic ALL
-  COMMAND ${CMAKE_MAKE_PROGRAM} -C ${CMAKE_CURRENT_SOURCE_DIR}/lib/xspublic
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lib/xspublic
-  COMMENT "Building Xsens SDK libraries using Makefile"
-)
-
-# Create executable
-add_executable(xsens_mti_node
-  src/main.cpp
-  src/xdainterface.cpp
-  src/xdacallback.cpp
-  src/xsens_log_handler.cpp
-  src/ntrip_util.cpp
-  src/xsens_time_handler.cpp
-)
-
-# Make sure the node depends on the Xsens SDK libs being built
+# Make sure xsens_mti_node depends on the xspublic build
 add_dependencies(xsens_mti_node xspublic ${PROJECT_NAME})
 
 if(TARGET rclcpp::rclcpp)
@@ -136,13 +118,7 @@ else()
   )
 endif()
 
-# Link ROS dependencies
-ament_target_dependencies(xsens_mti_node
-  rclcpp tf2 tf2_ros std_msgs geometry_msgs sensor_msgs
-  nav_msgs nmea_msgs mavros_msgs diagnostic_msgs rosidl_default_runtime
-)
-
-# ROS 2 typesupport handling for Foxy and later
+# Handle typesupport linking differently based on ROS distro
 if(${ROS_DISTRO} STREQUAL "foxy")
   target_link_libraries(xsens_mti_node
     ${CMAKE_BINARY_DIR}/libxsens_mti_ros2_driver__rosidl_typesupport_cpp.so
