@@ -40,6 +40,8 @@
 #include <xstypes/xsfilterprofilearray.h>
 #include <xstypes/xstypedefs.h>
 #include <xstypes/xsdatapacket.h>
+#include <xstypes/xsquaternion.h>
+#include <xstypes/xseuler.h>
 
 #include "messagepublishers/packetcallback.h"
 #include "messagepublishers/accelerationpublisher.h"
@@ -98,6 +100,8 @@ void XdaInterface::spinFor(std::chrono::milliseconds timeout)
 
 	if (!rosPacket.second.empty())
 	{
+		applyHeadingHold(rosPacket.second);
+
 		for (auto &cb : m_callbacks)
 		{
 			cb->operator()(rosPacket.second, rosPacket.first);
@@ -405,7 +409,6 @@ bool XdaInterface::connectDevice()
 bool XdaInterface::prepare()
 {
 	assert(m_device != 0);
-	m_node->get_parameter("enable_mgbe_filter_reset", m_enableMgbeFilterReset);
 
 	if (!m_device->gotoConfig())
 		return handleError("Could not go to config");
@@ -472,9 +475,9 @@ bool XdaInterface::prepare()
 /**
  * \brief Resets the filter state before an MGBE request.
  *
- * This function performs a hardcoded mode cycle on the device by switching to
- * config mode, waiting 100ms, switching back to measurement mode, and waiting
- * another 100ms.
+ * Switches to config mode, waits 100ms, switches back to measurement mode, waits another 100ms. The reinit restarts
+ * the VRU yaw at zero, so the pre-reset heading is captured here and re-applied in software (see applyHeadingHold)
+ * once the filter is running again, keeping the published heading continuous across the reset.
  */
 bool XdaInterface::resetFilter()
 {
@@ -490,7 +493,40 @@ bool XdaInterface::resetFilter()
 
 	rclcpp::sleep_for(std::chrono::milliseconds(100));
 
+	m_pendingYawRealign = m_lastPublishedYawDeg;
+
 	return true;
+}
+
+
+/**
+ * \brief Holds heading across a filter reset by applying a yaw offset to the orientation output.
+ *
+ * The MTi-320 (VRU) restarts yaw at zero after a config/measurement reinit and offers no command to restore an absolute
+ * heading, so continuity is re-seeded in software: the first oriented packet after a reset defines a yaw offset that makes
+ * the published heading continue from the pre-reset yaw, and that offset is applied to every packet thereafter. Only the
+ * orientation is corrected; global-frame vectors (free acceleration, velocity) are not, and are disabled in our config.
+ */
+void XdaInterface::applyHeadingHold(XsDataPacket &packet)
+{
+	if (!packet.containsOrientation())
+		return;
+
+	if (m_pendingYawRealign && m_haveHeading)
+	{
+		m_headingOffsetDeg = *m_pendingYawRealign - packet.orientationEuler().yaw();
+		RCLCPP_DEBUG(m_node->get_logger(), "Heading hold: continued yaw at %.2f deg after filter reset (offset %.2f deg).", *m_pendingYawRealign, m_headingOffsetDeg);
+	}
+	m_pendingYawRealign.reset();
+
+	if (m_headingOffsetDeg != 0.0)
+	{
+		XsQuaternion corrected = XsQuaternion(XsEuler(0.0, 0.0, m_headingOffsetDeg)) * packet.orientationQuaternion();
+		packet.setOrientationQuaternion(corrected, packet.coordinateSystemOrientation());
+	}
+
+	m_lastPublishedYawDeg = packet.orientationEuler().yaw();
+	m_haveHeading = true;
 }
 
 
@@ -514,7 +550,7 @@ bool XdaInterface::manualGyroBiasEstimation(uint16_t sleep, uint16_t duration)
 
     if (sleep > 0)
 		rclcpp::sleep_for(std::chrono::milliseconds(sleep));
-
+    m_node->get_parameter("enable_mgbe_filter_reset", m_enableMgbeFilterReset);
 	if (m_enableMgbeFilterReset)
 	{
 		RCLCPP_INFO(m_node->get_logger(), "Resetting filter before MGBE attempt.");
@@ -1536,7 +1572,7 @@ void XdaInterface::declareCommonParameters()
 	if (!m_node->has_parameter("set_baudrate_value"))
 		m_node->declare_parameter("set_baudrate_value", 115200);
 	if (!m_node->has_parameter("enable_mgbe_filter_reset"))
-		m_node->declare_parameter("enable_mgbe_filter_reset", true);
+		m_node->declare_parameter("enable_mgbe_filter_reset", false);
 	bool should_publish = true;
 	if (!m_node->has_parameter("pub_utctime"))
 		m_node->declare_parameter("pub_utctime", should_publish);
