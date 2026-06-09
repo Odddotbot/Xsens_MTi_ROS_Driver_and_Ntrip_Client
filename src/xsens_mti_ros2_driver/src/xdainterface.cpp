@@ -108,6 +108,7 @@ void XdaInterface::spinFor(std::chrono::milliseconds timeout)
 		}
 	}
 }
+
 void XdaInterface::registerPublishers()
 {
 	bool should_publish;
@@ -153,7 +154,6 @@ void XdaInterface::registerPublishers()
 		// RCLCPP_INFO(m_node->get_logger(), "registerCallback StatusPublisher....");
 		registerCallback(new StatusPublisher(m_node, m_diag_pub));
 	}
-
 	if (m_node->get_parameter("pub_utctime", should_publish) && should_publish)
 	{
 		//RCLCPP_INFO(m_node->get_logger(), "registerCallback UTCTimePublisher....");
@@ -459,6 +459,7 @@ bool XdaInterface::prepare()
 			return handleError("Could not start recording");
 	}
 
+
 	//delay 0.05 second, as the previous actions might take a little delay.
 	rclcpp::sleep_for(std::chrono::milliseconds(50));
 
@@ -579,10 +580,10 @@ bool XdaInterface::manualGyroBiasEstimation(uint16_t sleep, uint16_t duration)
 
 void XdaInterface::setupManualGyroBiasEstimation()
 {
-	// Check if manual gyro bias estimation is enabled and parameters are available
-	bool enable_manual_gyro_bias = false;
+    // Check if manual gyro bias estimation is enabled and parameters are available
+    bool enable_manual_gyro_bias = false;
 	//assign default value {10,3} to manual_gyro_bias_param
-	std::vector<long int>  manual_gyro_bias_param = {10, 3};
+    std::vector<long int>  manual_gyro_bias_param = {10, 3};
 	m_node->declare_parameter("enable_manual_gyro_bias", enable_manual_gyro_bias);
 	m_node->declare_parameter("manual_gyro_bias_param",manual_gyro_bias_param);
 
@@ -635,7 +636,10 @@ void XdaInterface::setupManualGyroBiasEstimation()
 		{
 			RCLCPP_INFO(m_node->get_logger(), "Manual Gyro Bias Estimation is disabled.");
 		}
+
 	}
+
+
 }
 
 
@@ -659,6 +663,8 @@ void XdaInterface::close()
 	}
 	m_control->closePort(m_port);
 }
+
+
 
 void XdaInterface::registerCallback(PacketCallback *cb)
 {
